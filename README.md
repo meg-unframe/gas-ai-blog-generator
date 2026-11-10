@@ -125,4 +125,11 @@ src/
   Setup.gs          APIキー・単価・対象シートの設定、接続テスト
 tests/
   validator.test.js Node の単体テスト
+legacy/             置き換え前の既存コードのバックアップ（clasp push の対象外。詳細は legacy/README.md）
 ```
+
+## 既存コードからの置き換えについて
+
+紐づけ先の Apps Script には、以前のコード（選択行から生成する版。`CONFIG`・`SAMPLE_ARTICLE` を含む）がありました。`CONFIG` と `onOpen` の名前が衝突し共存できないため、無改変で `legacy/` に保存したうえで、本実装に置き換えます。
+
+- 以前のコードは APIキーをスクリプトプロパティ `CLAUDE_API_KEY` から読んでいました。本実装は `ANTHROPIC_API_KEY` を使います。置き換え後、`CLAUDE_API_KEY` は使われなくなるため、Apps Script の「プロジェクトの設定 > スクリプト プロパティ」から削除してください（`clasp push` ではプロパティは削除されません）。
