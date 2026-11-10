@@ -36,10 +36,14 @@ Googleスプレッドシートの「未処理」行から、Claude API（`claude
 
 ### 1. clasp の準備（初回のみ）
 
+clasp はこのプロジェクトの開発依存（`devDependencies`、バージョン固定）として入れています。グローバルインストールや `sudo` は不要です。
+
 ```bash
-npm install -g @google/clasp
-clasp login            # ブラウザで Google アカウントにログイン
+npm install            # clasp を node_modules に導入
+npx clasp login        # ブラウザで Google アカウントにログイン
 ```
+
+以降の `clasp` コマンドは `npx clasp ...` で実行します。
 
 https://script.google.com/home/usersettings で「Google Apps Script API」をオンにします。
 
@@ -53,14 +57,14 @@ https://script.google.com/home/usersettings で「Google Apps Script API」を�
    ```
 
 > ⚠️ **`clasp push` は Apps Script 側のファイルをローカルの `src/` の内容で置き換えます。**
-> 紐づけ先の Apps Script に既存のコード（例: 別の `onOpen`）がある場合は消えてしまうため、push 前に Apps Script エディタで中身を確認してください。既存コードがあれば、別フォルダに `clasp clone <スクリプトID>` でバックアップを取ってから進めてください。
+> 紐づけ先の Apps Script に既存のコード（例: 別の `onOpen`）がある場合は消えてしまうため、push 前に Apps Script エディタで中身を確認してください。既存コードがあれば、別フォルダに `npx clasp clone <スクリプトID>` でバックアップを取ってから進めてください。
 > スプレッドシートのデータは push では変更されません。
 
 ### 3. テスト・反映
 
 ```bash
-npm test      # 単体テスト（API は呼ばない・費用なし）
-clasp push    # Apps Script へ反映
+npm test        # 単体テスト（API は呼ばない・費用なし）
+npx clasp push  # Apps Script へ反映（npm run push でも可）
 ```
 
 スプレッドシートを再読み込みすると「記事生成」メニューが表示されます。初回実行時に権限の承認画面が出ます。
