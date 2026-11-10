@@ -1,0 +1,10 @@
+{
+  "name": "gas-ai-blog-generator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Googleスプレッドシート + Claude API によるブログ記事自動生成（Google Apps Script）",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "push": "clasp push"
+  }
+}

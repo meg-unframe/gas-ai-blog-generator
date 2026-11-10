@@ -1,0 +1,12 @@
+# clasp の認証情報（絶対にコミットしない）
+.clasprc.json
+# スクリプトIDを含むため各自の環境で作成（.clasp.json.example を参照）
+.clasp.json
+
+# 秘密情報
+.env
+.env.*
+
+node_modules/
+*.log
+.DS_Store
