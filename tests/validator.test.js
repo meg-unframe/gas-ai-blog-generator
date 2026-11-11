@@ -81,9 +81,9 @@ test('Markdown 検出: 本文に混在するとNG（4行目で見つかったパ
   for (const [name, html] of Object.entries(ng)) {
     const r = check(html);
     assert.equal(r.ok, false, name);
-    // 文字数など別の理由ではなく、Markdown の検出だけでNGになっていること
-    assert.equal(r.errors.length, 1, name + ': ' + r.errors.join(' '));
-    assert.match(r.errors[0], /Markdown|「\*\*」|箇条書き|番号付き|コード記法|リンク/, name);
+    // Markdown として検出されていること、文字数など無関係な理由でNGになっていないこと
+    assert.ok(r.errors.some((e) => /Markdown|「\*\*」|箇条書き|番号付き|コード記法|リンク/.test(e)), name + ': ' + r.errors.join(' '));
+    assert.ok(!r.errors.some((e) => e.includes('文字数')), name + ': ' + r.errors.join(' '));
   }
 });
 
@@ -119,6 +119,55 @@ test('Markdown 検出: メタディスクリプション', () => {
   assert.equal(ctx.validateArticle({ body_html: body, meta_description: '**勤怠管理**のポイントを解説' }).ok, false);
   assert.equal(ctx.validateArticle({ body_html: body, meta_description: '# 勤怠管理のポイント' }).ok, false);
   assert.equal(ctx.validateArticle({ body_html: body, meta_description: 'C#入門者向けに #SEO の基本を解説します。' }).ok, true);
+});
+
+test('壊れたHTML: 記号表記のタグ・入れ子・閉じ忘れなどはNG（再生成の対象）', () => {
+  const pad = 'あ'.repeat(2300);
+  const check = (html) => ctx.validateArticle({ body_html: html, meta_description: okMeta });
+  const ng = {
+    // [本文, 期待するメッセージの一部]
+    '先頭の &lt;p&gt;（F4 で文字として見える状態）': [`<p>&lt;p&gt;${pad}</p><h2>まとめ</h2><p>x</p>`, '記号表記'],
+    '&lt;/p&gt;&lt;h2&gt;': [`<p>${pad}&lt;/p&gt;&lt;h2&gt;見出し</p><h2>まとめ</h2>`, '記号表記'],
+    '二重エスケープ &amp;lt;p&amp;gt;': [`<p>&amp;lt;p&amp;gt;${pad}</p><h2>まとめ</h2>`, '記号表記'],
+    '数値表記 &#60;p&#62;': [`<p>&#60;p&#62;${pad}</p><h2>まとめ</h2>`, '記号表記'],
+    '書きかけのタグ <p本文': [`<p>${pad}</p><h2>まとめ</h2><p>要点<p本文</p>`, 'タグになっていない'],
+    '二重タグ <p><p>': [`<p><p>${pad}</p></p><h2>まとめ</h2><p>x</p>`, '二重タグ'],
+    '<p> の中の見出し': [`<p>${pad}<h2>見出し</h2></p><h2>まとめ</h2><p>x</p>`, '二重タグ'],
+    '<p> の中のリスト': [`<p>${pad}<ul><li>a</li></ul></p><h2>まとめ</h2><p>x</p>`, '二重タグ'],
+    '<li> の中の見出し': [`<p>${pad}</p><ul><li><h3>小見出し</h3></li></ul><h2>まとめ</h2><p>x</p>`, '見出しがほかのタグの中'],
+    '閉じ忘れの <p>': [`<p>${pad}</p><h2>まとめ</h2><p>要点`, '閉じられていない'],
+    '開始タグのない </p>': [`<p>${pad}</p></p><h2>まとめ</h2><p>x</p>`, '対応する開始タグのない'],
+    '対応の崩れ <p><strong>…</p></strong>': [`<p>${pad}<strong>強調</p></strong><h2>まとめ</h2><p>x</p>`, '対応が崩れて'],
+    '見出しを </p> で閉じる': [`<p>${pad}</p><h2>見出し</p><h2>まとめ</h2><p>x</p>`, '対応する開始タグのない'],
+    'タグの外の文章': [`<p>${pad}</p>補足の文章<h2>まとめ</h2><p>x</p>`, 'どのタグにも囲まれていない'],
+    '<ul> 直下の文章': [`<p>${pad}</p><ul>項目</ul><h2>まとめ</h2><p>x</p>`, '直下に文章'],
+    '<ul> 直下の <p>': [`<p>${pad}</p><ul><p>項目</p></ul><h2>まとめ</h2><p>x</p>`, '<li> 以外のタグ'],
+    'リスト外の <li>': [`<p>${pad}</p><li>項目</li><h2>まとめ</h2><p>x</p>`, '<ul> / <ol> の外'],
+  };
+  for (const [name, [html, expected]] of Object.entries(ng)) {
+    const r = check(html);
+    assert.equal(r.ok, false, name);
+    assert.ok(r.errors.some((e) => e.includes(expected)), name + ': ' + r.errors.join(' '));
+    assert.ok(!r.errors.some((e) => e.includes('文字数')), name + ': ' + r.errors.join(' '));
+  }
+});
+
+test('壊れたHTML: 正しいHTMLは合格（<p> で始まる本文は仕様どおり）', () => {
+  const pad = 'あ'.repeat(2300);
+  const check = (html) => ctx.validateArticle({ body_html: html, meta_description: okMeta });
+  const ok = {
+    '基本の構成': `<p>${pad}</p>\n<h2>見出し</h2>\n<p>本文</p>\n<h3>小見出し</h3>\n<p>本文</p>\n<h2>まとめ</h2>\n<p>要点</p>`,
+    'リストと強調': `<p>${pad}</p><ul><li>項目<strong>強調</strong></li></ul><ol><li>手順</li></ol><h2>まとめ</h2><p><strong>要点</strong></p>`,
+    '入れ子のリスト': `<p>${pad}</p><ul><li>親<ul><li>子</li></ul></li></ul><h2>まとめ</h2><p>x</p>`,
+    '<li> の中の <p>': `<p>${pad}</p><ul><li><p>項目</p></li></ul><h2>まとめ</h2><p>x</p>`,
+    '比較の記号（記号表記）': `<p>${pad} a &lt; b、3 &gt; 2 の比較</p><h2>まとめ</h2><p>x</p>`,
+    '<h2> で始まる本文': `<h2>はじめに</h2><p>${pad}</p><h2>まとめ</h2><p>x</p>`,
+  };
+  for (const [name, html] of Object.entries(ok)) {
+    const r = check(html);
+    assert.equal(r.ok, true, name + ': ' + r.errors.join(' '));
+  }
+  assert.equal(ctx.findHtmlStructureProblems(makeBody(2500)).length, 0);
 });
 
 test('費用計算: トークン数 × 登録単価', () => {

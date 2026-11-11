@@ -12,6 +12,8 @@
  *   プレーンテキストとして (3)(4) で数える。HTMLタグ・文字参照は使用不可（検出したらNG）。
  *
  * 【Markdown 記法】本文・メタディスクリプションとも使用不可（findMarkdownProblems で検出したらNG → 再生成の対象）。
+ * 【壊れたHTML】本文はHTML形式（<p> で始まるのは正常）。記号表記のタグ・入れ子や閉じ忘れなどの
+ *   構造の誤りは findHtmlStructureProblems で検出したらNG → 再生成の対象。
  */
 
 function stripHtmlTags(html) {
@@ -77,6 +79,118 @@ function findHtmlProblems(html) {
     }
   }
   return problems;
+}
+
+/**
+ * 壊れたHTMLを検出する（本文はHTML形式なので、正しいタグ自体は問題ない）。
+ *  - escaped_tag     : &lt;p&gt; のように記号表記で書かれたタグ（WordPress で「<p>」が文字として見える）
+ *  - stray_bracket   : タグになっていない「<」「>」（書きかけのタグ「<p本文」など）
+ *  - nested          : <p><p>、<p> の中の見出し・リストなどの入れ子
+ *  - heading_not_top : 見出しがほかの要素の中にある
+ *  - list_child / li_outside_list / text_in_list : リスト構造の誤り
+ *  - text_outside    : どのタグにも囲まれていない文章
+ *  - unmatched_close / mismatched / unclosed : 開始タグと終了タグの対応の誤り
+ * 許可していないタグ（findHtmlProblems で別途NG）は構造チェックの対象外。
+ * @return {{type: string, example: string}[]} 種類ごとに最初の1件
+ */
+function findHtmlStructureProblems(html) {
+  const found = [];
+  const seen = {};
+  const add = function (type, example) {
+    if (seen[type]) return;
+    seen[type] = true;
+    found.push({ type: type, example: String(example).replace(/\s+/g, ' ').trim().slice(0, 30) });
+  };
+  const src = String(html).replace(/<!--[\s\S]*?-->/g, '');
+
+  const escaped = src.match(
+    /(?:&(?:amp;)?lt;|&#0*60;|&#x0*3c;)\/?[a-zA-Z][a-zA-Z0-9]*[^<>]*?(?:&(?:amp;)?gt;|&#0*62;|&#x0*3e;)/i
+  );
+  if (escaped) add('escaped_tag', escaped[0]);
+
+  const stack = [];
+  const top = function () {
+    return stack.length ? stack[stack.length - 1] : null;
+  };
+  const checkText = function (text) {
+    if (!decodeHtmlEntities(text).replace(/[\s　 ]+/g, '')) return;
+    if (/[<>]/.test(text)) add('stray_bracket', text);
+    const t = top();
+    if (t === null) add('text_outside', text);
+    else if (t === 'ul' || t === 'ol') add('text_in_list', text);
+  };
+
+  const tagPattern = /<\s*(\/?)\s*([a-zA-Z][a-zA-Z0-9-]*)[^<>]*>/g;
+  let last = 0;
+  let m;
+  while ((m = tagPattern.exec(src)) !== null) {
+    checkText(src.slice(last, m.index));
+    last = tagPattern.lastIndex;
+    const isClosing = m[1] === '/';
+    const name = m[2].toLowerCase();
+    if (CONFIG.ALLOWED_TAGS.indexOf(name) === -1) continue;
+    const t = top();
+
+    if (isClosing) {
+      if (t === name) {
+        stack.pop();
+      } else if (stack.indexOf(name) === -1) {
+        add('unmatched_close', m[0]);
+      } else {
+        add('mismatched', '<' + t + '>…' + m[0]);
+        while (stack.length && stack.pop() !== name) {
+          // 対応する開始タグまで戻す
+        }
+      }
+      continue;
+    }
+
+    if (t === 'ul' || t === 'ol') {
+      if (name !== 'li') add('list_child', '<' + t + '>' + m[0]);
+    } else if (name === 'li') {
+      add('li_outside_list', m[0]);
+    } else if (name !== 'strong' && (t === 'p' || t === 'h2' || t === 'h3' || t === 'strong')) {
+      add('nested', '<' + t + '>' + m[0]);
+    } else if ((name === 'h2' || name === 'h3') && t !== null) {
+      add('heading_not_top', '<' + t + '>' + m[0]);
+    } else if (name === 'strong' && t === null) {
+      add('text_outside', m[0]);
+    }
+    stack.push(name);
+  }
+  checkText(src.slice(last));
+  if (stack.length) add('unclosed', '<' + stack.join('><') + '>');
+  return found;
+}
+
+function describeHtmlStructureProblem_(p) {
+  const ex = '（例:「' + p.example + '」）';
+  switch (p.type) {
+    case 'escaped_tag':
+      return 'タグが記号表記' + ex + 'で書かれており、WordPress では「<p>」のような文字として表示されます。タグは < > で直接書いてください。';
+    case 'stray_bracket':
+      return 'タグになっていない「<」「>」' + ex + 'があります。本文中で「<」「>」を文字として使わず、タグは <p>…</p> の形で正しく書いてください。';
+    case 'nested':
+      return '段落・見出しの中に、段落・見出し・リストが入っています' + ex + '。<p><p> のような二重タグや入れ子にしないでください。';
+    case 'heading_not_top':
+      return '見出しがほかのタグの中にあります' + ex + '。<h2> / <h3> は単独で書いてください。';
+    case 'list_child':
+      return '<ul> / <ol> の直下に <li> 以外のタグがあります' + ex + '。';
+    case 'li_outside_list':
+      return '<li> が <ul> / <ol> の外にあります' + ex + '。';
+    case 'text_in_list':
+      return '<ul> / <ol> の直下に文章があります' + ex + '。項目は <li>…</li> で囲んでください。';
+    case 'text_outside':
+      return 'どのタグにも囲まれていない文章があります' + ex + '。文章は <p>…</p> などで囲んでください。';
+    case 'unmatched_close':
+      return '対応する開始タグのない終了タグがあります' + ex + '。';
+    case 'mismatched':
+      return '開始タグと終了タグの対応が崩れています' + ex + '。';
+    case 'unclosed':
+      return '閉じられていないタグがあります' + ex + '。開始タグには必ず終了タグを付けてください。';
+    default:
+      return 'HTMLの構造に誤りがあります' + ex + '。';
+  }
 }
 
 /**
@@ -153,6 +267,9 @@ function validateArticle(article) {
     if (body.charAt(0) !== '<') errors.push('本文はHTMLタグ（<p> または <h2>）で始めてください。');
     findHtmlProblems(body).forEach(function (p) {
       errors.push(p);
+    });
+    findHtmlStructureProblems(body).forEach(function (p) {
+      errors.push(describeHtmlStructureProblem_(p));
     });
     findMarkdownProblems(body).forEach(function (p) {
       errors.push(describeBodyMarkdownProblem_(p));
