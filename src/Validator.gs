@@ -10,6 +10,8 @@
  *   ※ スペース（半角・全角）は数える
  *  メタディスクリプション:
  *   プレーンテキストとして (3)(4) で数える。HTMLタグ・文字参照は使用不可（検出したらNG）。
+ *
+ * 【Markdown 記法】本文・メタディスクリプションとも使用不可（findMarkdownProblems で検出したらNG → 再生成の対象）。
  */
 
 function stripHtmlTags(html) {
@@ -78,6 +80,64 @@ function findHtmlProblems(html) {
 }
 
 /**
+ * Markdown 記法を検出する。
+ * ブロック要素（p, h1〜h6, ul, ol, li, div, br）の境界で「行」に分け、
+ * それ以外のタグ（strong など）は取り除いてから、文字参照を戻して判定する。
+ * 誤検出を避けるため、見出しは「行頭の # の直後が空白か行末」のときだけ検出する
+ * （「C#」やハッシュタグ「#SEO」は対象外）。
+ * @return {{type: string, example: string}[]} 種類ごとに最初の1件
+ */
+function findMarkdownProblems(html) {
+  const text = decodeHtmlEntities(
+    String(html)
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<\/?(?:p|h[1-6]|ul|ol|li|div|br)\b[^>]*>/gi, '\n')
+      .replace(/<[^>]*>/g, '')
+  );
+  const found = [];
+  const seen = {};
+  const add = function (type, example) {
+    if (seen[type]) return;
+    seen[type] = true;
+    found.push({ type: type, example: String(example).trim().slice(0, 30) });
+  };
+
+  text.split(/\r?\n/).forEach(function (rawLine) {
+    const line = rawLine.replace(/^[ \t　 ]+/, '');
+    if (/^[#＃]{1,6}(?:[ \t　 ]|$)/.test(line)) add('heading', line);
+    if (/^[-*+][ \t　 ]/.test(line)) add('list', line);
+    if (/^\d+[.)][ \t　 ]/.test(line)) add('ordered_list', line);
+  });
+
+  let m;
+  if ((m = text.match(/\*\*[^*\n]+\*\*|__[^_\n]+__/))) add('bold', m[0]);
+  if ((m = text.match(/```/))) add('code', m[0]);
+  else if ((m = text.match(/`[^`\n]+`/))) add('code', m[0]);
+  if ((m = text.match(/\[[^\]\n]+\]\([^)\s]+\)/))) add('link', m[0]);
+  return found;
+}
+
+function describeBodyMarkdownProblem_(p) {
+  const ex = '（例:「' + p.example + '」）';
+  switch (p.type) {
+    case 'heading':
+      return 'Markdown の見出し記法' + ex + 'が含まれています。見出しは <h2> / <h3> タグで書き、「#」は付けないでください。';
+    case 'list':
+      return '行頭の「- 」「* 」による箇条書き' + ex + 'が含まれています。<ul><li> を使ってください。';
+    case 'ordered_list':
+      return '行頭の「1. 」による番号付きリスト' + ex + 'が含まれています。<ol><li> を使ってください。';
+    case 'bold':
+      return '「**」「__」による強調' + ex + 'が含まれています。<strong> を使ってください。';
+    case 'code':
+      return 'コード記法（``` や `）' + ex + 'が含まれています。使わないでください。';
+    case 'link':
+      return '[文字](URL) 形式のリンク' + ex + 'が含まれています。リンクは書かないでください。';
+    default:
+      return 'Markdown 記法' + ex + 'が含まれています。HTMLタグで書いてください。';
+  }
+}
+
+/**
  * 記事（{ body_html, meta_description }）を検証する。
  * @return {{ok: boolean, errors: string[], body: string, meta: string, bodyChars: number, metaChars: number}}
  */
@@ -93,6 +153,9 @@ function validateArticle(article) {
     if (body.charAt(0) !== '<') errors.push('本文はHTMLタグ（<p> または <h2>）で始めてください。');
     findHtmlProblems(body).forEach(function (p) {
       errors.push(p);
+    });
+    findMarkdownProblems(body).forEach(function (p) {
+      errors.push(describeBodyMarkdownProblem_(p));
     });
     const h2s = extractHeadingTexts(body, 'h2');
     if (h2s.length === 0) {
@@ -118,6 +181,10 @@ function validateArticle(article) {
       errors.push('メタディスクリプションに文字参照（&amp; など）は使えません。');
     }
     if (/^[=+\-@]/.test(meta)) errors.push('メタディスクリプションの先頭に「= + - @」は使えません。');
+    const metaMarkdown = findMarkdownProblems(meta);
+    if (metaMarkdown.length) {
+      errors.push('メタディスクリプションに Markdown 記法（例:「' + metaMarkdown[0].example + '」）は使えません。プレーンテキストで書いてください。');
+    }
     metaChars = countMetaChars(meta);
     if (metaChars > CONFIG.META_MAX_CHARS) {
       errors.push('メタディスクリプションが ' + metaChars + ' 字です。' + CONFIG.META_MAX_CHARS + ' 字以内にしてください。');

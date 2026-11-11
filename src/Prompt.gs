@@ -18,7 +18,12 @@ function buildSystemPrompt() {
     '- 与えられたタイトルの内容に沿って書く。メインキーワードは本文中に自然に含め、サブキーワードも文脈に合う範囲で自然に使う。不自然な繰り返しや詰め込みはしない。',
     '- 読みやすい自然な日本語で書く。1つの段落を長くしすぎない。',
     '- 確認できない統計・数値・固有の事例・出典を作らない。断定できない情報は一般論として書く。',
-    '- Markdown 記法やコードブロックは使わない。',
+    '- 書式はすべてHTMLタグで表し、Markdown 記法は一切使わない。',
+    '  - 見出しは必ず <h2> または <h3> タグで書く。行頭に「#」「##」「###」を書かない。タグの中にも「#」を付けない（<h2>## 見出し</h2> は不可）。',
+    '  - 強調は <strong> を使い、「**」「__」は使わない。',
+    '  - 箇条書きは <ul><li>、番号付きリストは <ol><li> を使い、行頭の「- 」「* 」「1. 」は使わない。',
+    '  - コードブロック（```）、インラインコード（`）、[文字](URL) 形式のリンクは使わない。',
+    '- 正しい書式の例: <p>導入文</p><h2>大見出し</h2><p>本文</p><h3>小見出し</h3><ul><li>項目</li></ul><h2>まとめ</h2><p>要点</p>',
     '',
     '# meta_description の条件',
     '- ' + CONFIG.META_MAX_CHARS + ' 字以内（目安 80〜110 字）のプレーンテキスト。HTMLタグ・文字参照（&amp; など）・改行は使わない。',
@@ -62,7 +67,7 @@ function getArticleSchema() {
   return {
     type: 'object',
     properties: {
-      body_html: { type: 'string', description: '記事本文のHTML（h2/h3/p/ul/ol/li/strong のみ、属性なし）' },
+      body_html: { type: 'string', description: '記事本文のHTML（h2/h3/p/ul/ol/li/strong のみ、属性なし。見出しは <h2>/<h3> タグで書き、# や ** などの Markdown 記法は使わない）' },
       meta_description: { type: 'string', description: CONFIG.META_MAX_CHARS + '字以内のメタディスクリプション（プレーンテキスト）' },
     },
     required: ['body_html', 'meta_description'],
